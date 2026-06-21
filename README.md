@@ -1,98 +1,134 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Backend (NestJS)
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+REST API for OTP authentication, a digital wallet, and document-based KYC verification.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+**Stack:** NestJS · Prisma · PostgreSQL · JWT · class-validator
 
-## Description
+---
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Features
 
-## Project setup
+### Auth
 
-```bash
-$ npm install
+- OTP-based register / login (one unified flow)
+- New users provide a name to complete registration
+- JWT issued on successful verification (custom guard, no Passport)
+
+### Wallet
+
+- Add money, withdraw (with balance validation)
+- Passbook / transaction history (paginated, with running balance)
+- Wallet summary using SQL aggregates (`SUM`, `COUNT`)
+
+### KYC
+
+- Document upload + verification (Aadhaar / PAN)
+- Swappable provider interface (`KycProvider`)
+- Status flow: `NOT_STARTED → PENDING → VERIFIED / FAILED`
+
+### Security
+
+- **JWT auth** via a custom guard + `@CurrentUser` decorator
+- **OTP hashing** — OTPs stored as bcrypt hashes, never plaintext
+- **Attempt lockout** — OTP invalidated after 3 incorrect attempts
+- **OTP expiry** — configurable window (default 5 min)
+- DTO validation with `class-validator`
+
+---
+
+## Architecture Notes
+
+**KYC provider abstraction.** Real Aadhaar e-KYC requires AUA/KUA licensing
+(UIDAI) or a licensed aggregator (e.g. Cashfree Smart OCR), both needing business
+onboarding unavailable in an interview timeframe. The module is built against the
+real provider contract (Cashfree `bharat-ocr` response shape) behind a
+`KycProvider` interface, with a `MockOcrProvider` returning the exact sandbox
+response structure. Swapping to the live `CashfreeOcrProvider` is a one-line
+binding change in `kyc.module.ts`. The mock can force `VALID / FAILED / PENDING`
+outcomes for demonstration.
+
+**OTP delivery.** Delivering SMS to Indian numbers requires DLT registration
+(a TRAI business process) regardless of provider. For the demo the OTP is
+returned in the `request-otp` response; in production this is where a
+DLT-registered SMS provider plugs in and the code would never be returned.
+
+**Money handling.** Balances use Prisma `Decimal` (no floats). Updates use an
+atomic conditional update (optimistic locking) so concurrent transactions cannot
+corrupt the balance. Each transaction stores `balanceAfter` for the passbook.
+
+---
+
+## Structure
+
+```
+src/
+  auth/        # OTP auth, JWT guard, decorators
+  users/       # user details endpoint
+  wallet/      # add / withdraw / passbook / summary
+  kyc/         # KYC verification + provider abstraction
+  prisma/      # Prisma service (global module)
+prisma/
+  schema.prisma
 ```
 
-## Compile and run the project
+---
+
+## Setup
+
+### Prerequisites
+
+- Node.js 18+
+- PostgreSQL (local or hosted, e.g. Neon)
+
+### Install & configure
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
 ```
 
-## Run tests
+### Run
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npx prisma generate
+npx prisma migrate dev      # local   (use migrate deploy in production)
+npm run start:dev
 ```
 
-## Deployment
+API runs at `http://localhost:3000`.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+---
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## API Endpoints
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+Protected routes require `Authorization: Bearer <token>`.
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### Auth
 
-## Resources
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/auth/request-otp` | Request an OTP for a mobile number |
+| POST | `/auth/verify-otp` | Verify OTP (+ name for new users), returns JWT |
 
-Check out a few resources that may come in handy when working with NestJS:
+### Users
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/users/me` | Profile + wallet balance |
 
-## Support
+### Wallet
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/wallet/add` | Add money |
+| POST | `/wallet/withdraw` | Withdraw money |
+| GET | `/wallet/passbook` | Transaction history (paginated) |
+| GET | `/wallet/summary` | Totals via SQL aggregates |
 
-## Stay in touch
+### KYC
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/kyc/verify` | Upload document (multipart) + verify |
+| GET | `/kyc/status` | Current KYC status |
 
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+---
