@@ -39,6 +39,7 @@ model Otp {
   id        String   @id @default(uuid())
   userId    String
   code      String
+  attempts  Int      @default(0)
   expiresAt DateTime
   consumed  Boolean  @default(false)
   createdAt DateTime @default(now())

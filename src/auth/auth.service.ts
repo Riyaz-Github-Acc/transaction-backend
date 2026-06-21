@@ -3,17 +3,19 @@ import {
   BadRequestException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
 import { RequestOtpDto, VerifyOtpDto } from './dto/auth.dto';
 import { PrismaService } from 'prisma/prisma.service';
+
+const MAX_OTP_ATTEMPTS = 3;
+const OTP_EXPIRY_MINUTES = 5;
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
-    private readonly config: ConfigService,
   ) {}
 
   async requestOtp(dto: RequestOtpDto) {
@@ -24,8 +26,8 @@ export class AuthService {
     });
 
     const code = this.generateOtp();
-    const expiryMins = Number(this.config.get('OTP_EXPIRY_MINUTES')) || 5;
-    const expiresAt = new Date(Date.now() + expiryMins * 60 * 1000);
+    const hashedCode = await bcrypt.hash(code, 10);
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
     await this.prisma.$transaction([
       this.prisma.otp.updateMany({
@@ -33,7 +35,7 @@ export class AuthService {
         data: { consumed: true },
       }),
       this.prisma.otp.create({
-        data: { userId: user.id, code, expiresAt },
+        data: { userId: user.id, code: hashedCode, expiresAt },
       }),
     ]);
 
@@ -59,11 +61,45 @@ export class AuthService {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (!otp || otp.code !== dto.code) {
-      throw new UnauthorizedException('Invalid OTP');
+    if (!otp) {
+      throw new UnauthorizedException(
+        'No active OTP. Please request a new one.',
+      );
     }
+
     if (otp.expiresAt < new Date()) {
+      await this.prisma.otp.update({
+        where: { id: otp.id },
+        data: { consumed: true },
+      });
       throw new UnauthorizedException('OTP has expired');
+    }
+
+    if (otp.attempts >= MAX_OTP_ATTEMPTS) {
+      await this.prisma.otp.update({
+        where: { id: otp.id },
+        data: { consumed: true },
+      });
+      throw new UnauthorizedException(
+        'Too many incorrect attempts. Please request a new OTP.',
+      );
+    }
+
+    const isMatch = await bcrypt.compare(dto.code, otp.code);
+    if (!isMatch) {
+      const attempts = otp.attempts + 1;
+      const lockedOut = attempts >= MAX_OTP_ATTEMPTS;
+
+      await this.prisma.otp.update({
+        where: { id: otp.id },
+        data: { attempts, consumed: lockedOut },
+      });
+
+      throw new UnauthorizedException(
+        lockedOut
+          ? 'Too many incorrect attempts. Please request a new OTP.'
+          : `Invalid OTP. ${MAX_OTP_ATTEMPTS - attempts} attempt(s) remaining.`,
+      );
     }
 
     if (!user.isVerified && !dto.name) {
@@ -78,7 +114,6 @@ export class AuthService {
         isVerified: true,
         ...(dto.name ? { name: dto.name } : {}),
         otps: { update: { where: { id: otp.id }, data: { consumed: true } } },
-
         wallet: {
           connectOrCreate: {
             where: { userId: user.id },
